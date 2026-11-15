@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EcoClasifica · Clasificador de residuos reciclables</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+<style>
+  :root{--bg:#f6f7f4;--card:#fff;--ink:#1d2421;--muted:#5d6b64;--line:#dfe4e0;--acc:#1f7a4d;--acc2:#e8f3ed;--warn:#b5541b}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
+  header{background:var(--acc);color:#fff;padding:22px 28px}
+  header h1{margin:0;font-size:1.5rem}
+  header p{margin:4px 0 0;opacity:.9;font-size:.95rem}
+  main{max-width:1100px;margin:0 auto;padding:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:18px}
+  h2{font-size:1.1rem;margin:0 0 12px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  input[type=text]{flex:1;min-width:260px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:.95rem}
+  button,.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 16px;font-size:.92rem;cursor:pointer;display:inline-block}
+  button.sec,.btn.sec{background:var(--acc2);color:var(--acc)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .muted{color:var(--muted);font-size:.88rem}
+  .tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+  .tab{background:none;color:var(--muted);border-radius:0;border-bottom:3px solid transparent;padding:10px 14px}
+  .tab.active{color:var(--acc);border-bottom-color:var(--acc);font-weight:600}
+  .pane{display:none}.pane.active{display:block}
+  #drop{border:2px dashed var(--line);border-radius:12px;padding:28px;text-align:center;cursor:pointer}
+  #drop.over{border-color:var(--acc);background:var(--acc2)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-top:14px}
+  .item{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+  .item img{width:100%;height:150px;object-fit:cover;display:block}
+  .item .b{padding:10px}
+  .bar{height:7px;background:#eef1ef;border-radius:4px;overflow:hidden;margin:2px 0 6px}
+  .bar i{display:block;height:100%;background:var(--acc)}
+  .bin{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.78rem;font-weight:600;border:1px solid #999}
+  .bin.blanco{background:#fff;color:#333}.bin.negro{background:#222;color:#fff}.bin.verde{background:#2e8b57;color:#fff}
+  table{border-collapse:collapse;width:100%;font-size:.9rem}
+  th,td{border:1px solid var(--line);padding:6px 8px;text-align:center}
+  th{background:#f1f4f2}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0 16px}
+  .kpi{background:var(--acc2);border-radius:10px;padding:12px}
+  .kpi b{display:block;font-size:1.5rem;color:var(--acc)}
+  .kpi span{font-size:.82rem;color:var(--muted)}
+  progress{width:100%;height:14px}
+  canvas{max-width:100%}
+  .warn{color:var(--warn)}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:800px){.two{grid-template-columns:1fr}}
+  #status{margin-top:8px}
+  code{background:#f1f4f2;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>♻️ EcoClasifica</h1>
+  <p>Clasificación de residuos sólidos (cartón, vidrio, metal, papel, plástico, no aprovechable) con un modelo entrenado en Teachable Machine</p>
+</header>
+<main>
+
+<section class="card">
+  <h2>1. Conectar el modelo</h2>
+  <div class="row">
+    <input id="modelUrl" type="text" placeholder="https://teachablemachine.withgoogle.com/models/XXXXXXXX/" />
+    <button id="btnLoad">Cargar modelo</button>
+  </div>
+  <details style="margin-top:10px">
+    <summary class="muted">¿Descargaste el modelo en lugar de subirlo? Cárgalo desde archivos</summary>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">model.json <input type="file" id="fModel" accept=".json"></label>
+      <label class="muted">weights.bin <input type="file" id="fWeights" accept=".bin"></label>
+      <label class="muted">metadata.json <input type="file" id="fMeta" accept=".json"></label>
+      <button class="sec" id="btnLoadFiles">Cargar desde archivos</button>
+    </div>
+  </details>
+  <div id="status" class="muted">Modelo no cargado.</div>
+</section>
+
+<section class="card">
+  <div class="tabs">
+    <button class="tab active" data-pane="p-classify">2. Clasificar imágenes</button>
+    <button class="tab" data-pane="p-cam">Cámara en vivo</button>
+    <button class="tab" data-pane="p-eval">3. Evaluar con un dataset</button>
+  </div>
+
+  <div id="p-classify" class="pane active">
+    <div id="drop">
+      <strong>Arrastra imágenes aquí</strong> o haz clic para seleccionarlas<br>
+      <span class="muted">JPG / PNG · puedes cargar varias a la vez</span>
+      <input id="fImgs" type="file" accept="image/*" multiple hidden>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="sec" id="btnClear">Limpiar resultados</button></div>
+    <div id="grid" class="grid"></div>
+  </div>
+
+  <div id="p-cam" class="pane">
+    <div class="row"><button id="btnCam">Iniciar cámara</button><button class="sec" id="btnCamStop" disabled>Detener</button></div>
+    <div class="two" style="margin-top:12px">
+      <div id="camBox"></div>
+      <div id="camOut" class="muted">La predicción aparecerá aquí.</div>
+    </div>
+  </div>
+
+  <div id="p-eval" class="pane">
+    <p class="muted">Selecciona la <b>carpeta de prueba</b> con una subcarpeta por clase, cuyo nombre coincida con el de la clase en Teachable Machine
+      (p. ej. <code>test/cardboard/*.jpg</code>, <code>test/glass/*.jpg</code>…). Usa imágenes que <b>no</b> se usaron para entrenar.</p>
+    <div class="row">
+      <label class="btn">Elegir carpeta de prueba<input id="fDir" type="file" webkitdirectory directory multiple hidden></label>
+      <button id="btnEval" disabled>Evaluar</button>
+      <button class="sec" id="btnCsv" disabled>Descargar predicciones (CSV)</button>
+      <button class="sec" id="btnJson" disabled>Descargar métricas (JSON)</button>
+    </div>
+    <div id="dirInfo" class="muted" style="margin-top:8px"></div>
+    <progress id="prog" value="0" max="1" hidden></progress>
+    <div id="evalOut"></div>
+  </div>
+</section>
+
+<p class="muted" style="text-align:center">Proyecto académico · Visión por computador · Contenedores según Resolución 2184 de 2019 (blanco: aprovechables, negro: no aprovechables, verde: orgánicos)</p>
+</main>
+
+<script>
+/* ===================== MÉTRICAS (funciones puras, sin DOM) ===================== */
+const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toLowerCase();
+
+function confusionMatrix(yTrue, yPred, K){
+  const M = Array.from({length:K},()=>Array(K).fill(0));
+  for(let i=0;i<yTrue.length;i++) M[yTrue[i]][yPred[i]]++;
+  return M;
+}
+function perClassMetrics(M){
+  const K = M.length, out = [];
+  for(let k=0;k<K;k++){
+    const tp = M[k][k];
+    let fp=0, fn=0, sup=0;
+    for(let j=0;j<K;j++){ if(j!==k){ fp+=M[j][k]; fn+=M[k][j]; } sup+=M[k][j]; }
+    const p = tp+fp ? tp/(tp+fp) : 0, r = tp+fn ? tp/(tp+fn) : 0;
+    const f1 = p+r ? 2*p*r/(p+r) : 0;
+    out.push({precision:p, recall:r, f1, support:sup});
+  }
+  return out;
+}
+/* ROC uno-contra-todos. Maneja empates agrupando puntajes iguales (igual que sklearn). */
+function rocCurve(yBin, scores){
+  const idx = scores.map((s,i)=>i).sort((a,b)=>scores[b]-scores[a]);
+  const P = yBin.reduce((a,b)=>a+b,0), N = yBin.length-P;
+  const fpr=[0], tpr=[0], thr=[Infinity];
+  if(P===0||N===0) return {fpr,tpr,thr,auc:NaN};
+  let tp=0, fp=0;
+  for(let i=0;i<idx.length;i++){
+    yBin[idx[i]] ? tp++ : fp++;
+    const next = i+1<idx.length ? scores[idx[i+1]] : -Infinity;
+    if(next !== scores[idx[i]]){ fpr.push(fp/N); tpr.push(tp/P); thr.push(scores[idx[i]]); }
+  }
+  let auc=0;
+  for(let i=1;i<fpr.length;i++) auc += (fpr[i]-fpr[i-1])*(tpr[i]+tpr[i-1])/2;
+  return {fpr,tpr,thr,auc};
+}
+function computeAll(yTrue, probs, classNames){
+  const K = classNames.length;
+  const yPred = probs.map(p=>p.indexOf(Math.max(...p)));
+  const M = confusionMatrix(yTrue, yPred, K);
+  const pc = perClassMetrics(M);
+  const n = yTrue.length;
+  const acc = yTrue.reduce((a,t,i)=>a+(t===yPred[i]?1:0),0)/n;
+  const present = pc.map((m,k)=>m.support>0);
+  const nPresent = present.filter(Boolean).length;
+  const macro = key => pc.reduce((a,m,k)=>a+(present[k]?m[key]:0),0)/nPresent;
+  const weighted = key => pc.reduce((a,m)=>a+m[key]*m.support,0)/n;
+  const rocs = classNames.map((c,k)=> rocCurve(yTrue.map(t=>t===k?1:0), probs.map(p=>p[k])));
+  const aucs = rocs.map(r=>r.auc).filter(a=>!isNaN(a));
+  return {
+    n, classNames, confusion:M, yPred, accuracy:acc,
+    perClass: pc.map((m,k)=>({clase:classNames[k], ...m, auc:rocs[k].auc})),
+    macro:{precision:macro('precision'), recall:macro('recall'), f1:macro('f1'), auc: aucs.reduce((a,b)=>a+b,0)/aucs.length},
+    weighted:{precision:weighted('precision'), recall:weighted('recall'), f1:weighted('f1')},
+    rocs
+  };
+}
+if (typeof module !== 'undefined') module.exports = {confusionMatrix, perClassMetrics, rocCurve, computeAll, norm};
+</script>
+
+<script>
+/* ===================== APLICACIÓN ===================== */
+if (typeof document !== 'undefined') (function(){
+const $ = id => document.getElementById(id);
+let model = null, classNames = [], evalFiles = [], lastResult = null, lastRows = [], webcam = null, camLoop = false;
+
+const BIN = {
+  cardboard:['blanco','Cartón'], carton:['blanco','Cartón'],
+  glass:['blanco','Vidrio'], vidrio:['blanco','Vidrio'],
+  metal:['blanco','Metal'],
+  paper:['blanco','Papel'], papel:['blanco','Papel'],
+  plastic:['blanco','Plástico'], plastico:['blanco','Plástico'],
+  trash:['negro','No aprovechable'], basura:['negro','No aprovechable'], 'no aprovechable':['negro','No aprovechable'],
+  organic:['verde','Orgánico'], organico:['verde','Orgánico']
+};
+const binOf = c => BIN[norm(c)] || ['', c];
+const pct = x => (100*x).toFixed(1)+'%';
+const f3 = x => isNaN(x) ? '—' : x.toFixed(3);
+
+function setStatus(msg, warn){ $('status').innerHTML = msg; $('status').className = warn ? 'warn' : 'muted'; }
+function onModelReady(){
+  classNames = model.getClassLabels();
+  setStatus(`✅ Modelo cargado · ${classNames.length} clases: <b>${classNames.join(', ')}</b>`);
+  $('btnEval').disabled = !evalFiles.length;
+}
+$('btnLoad').onclick = async () => {
+  let url = $('modelUrl').value.trim();
+  if(!url){ setStatus('Pega la URL del modelo publicado en Teachable Machine.', true); return; }
+  if(!url.endsWith('/')) url += '/';
+  setStatus('Cargando modelo…');
+  try { model = await tmImage.load(url+'model.json', url+'metadata.json'); onModelReady(); localStorageSafe('set', url); }
+  catch(e){ setStatus('No se pudo cargar el modelo: '+e.message, true); }
+};
+$('btnLoadFiles').onclick = async () => {
+  const [m,w,d] = [$('fModel').files[0], $('fWeights').files[0], $('fMeta').files[0]];
+  if(!m||!w||!d){ setStatus('Selecciona los tres archivos del modelo.', true); return; }
+  setStatus('Cargando modelo desde archivos…');
+  try { model = await tmImage.loadFromFiles(m,w,d); onModelReady(); }
+  catch(e){ setStatus('Error: '+e.message, true); }
+};
+function localStorageSafe(op, v){ try{ if(op==='set') localStorage.setItem('ecoModelUrl', v); else return localStorage.getItem('ecoModelUrl'); }catch(e){ return null; } }
+const saved = localStorageSafe('get'); if(saved) $('modelUrl').value = saved;
+
+/* Pestañas */
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active'); $(t.dataset.pane).classList.add('active');
+});
+
+function loadImage(file){
+  return new Promise((res, rej) => {
+    const img = new Image(); img.onload = () => res(img); img.onerror = rej;
+    img.src = URL.createObjectURL(file);
+  });
+}
+function needModel(){ if(!model){ setStatus('Primero carga el modelo (paso 1).', true); window.scrollTo({top:0,behavior:'smooth'}); return true; } return false; }
+
+/* Clasificación individual */
+async function classifyFiles(files){
+  if(needModel()) return;
+  for(const f of files){
+    if(!f.type.startsWith('image/')) continue;
+    const img = await loadImage(f);
+    const pred = (await model.predict(img)).sort((a,b)=>b.probability-a.probability);
+    const [bin, es] = binOf(pred[0].className);
+    const div = document.createElement('div'); div.className='item';
+    div.innerHTML = `<img src="${img.src}" alt=""><div class="b">
+      <div><b>${es}</b> · ${pct(pred[0].probability)}</div>
+      ${bin?`<div style="margin:4px 0 8px"><span class="bin ${bin}">Caneca ${bin}</span></div>`:''}
+      ${pred.map(p=>`<div class="muted">${p.className} ${pct(p.probability)}</div><div class="bar"><i style="width:${100*p.probability}%"></i></div>`).join('')}
+    </div>`;
+    $('grid').prepend(div);
+  }
+}
+const drop = $('drop');
+drop.onclick = () => $('fImgs').click();
+$('fImgs').onchange = e => classifyFiles([...e.target.files]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); classifyFiles([...e.dataTransfer.files]); };
+$('btnClear').onclick = () => $('grid').innerHTML='';
+
+/* Cámara */
+$('btnCam').onclick = async () => {
+  if(needModel()) return;
+  try{
+    webcam = new tmImage.Webcam(300, 300, true); await webcam.setup(); await webcam.play();
+    $('camBox').innerHTML=''; $('camBox').appendChild(webcam.canvas);
+    camLoop = true; $('btnCam').disabled = true; $('btnCamStop').disabled = false;
+    const loop = async () => {
+      if(!camLoop) return;
+      webcam.update();
+      const pred = (await model.predict(webcam.canvas)).sort((a,b)=>b.probability-a.probability);
+      const [bin, es] = binOf(pred[0].className);
+      $('camOut').innerHTML = `<div style="font-size:1.3rem"><b>${es}</b> ${pct(pred[0].probability)}</div>
+        ${bin?`<p><span class="bin ${bin}">Caneca ${bin}</span></p>`:''}
+        ${pred.map(p=>`<div class="muted">${p.className} ${pct(p.probability)}</div><div class="bar"><i style="width:${100*p.probability}%"></i></div>`).join('')}`;
+      requestAnimationFrame(loop);
+    };
+    loop();
+  }catch(e){ $('camOut').innerHTML = `<span class="warn">No se pudo abrir la cámara: ${e.message}</span>`; }
+};
+$('btnCamStop').onclick = () => { camLoop=false; if(webcam) webcam.stop(); $('btnCam').disabled=false; $('btnCamStop').disabled=true; };
+
+/* Evaluación por carpetas */
+$('fDir').onchange = e => {
+  evalFiles = [...e.target.files].filter(f => /\.(jpe?g|png|webp|bmp)$/i.test(f.name));
+  const counts = {};
+  evalFiles.forEach(f => { const p = f.webkitRelativePath.split('/'); const c = p[p.length-2]; counts[c]=(counts[c]||0)+1; });
+  $('dirInfo').innerHTML = `${evalFiles.length} imágenes · ` + Object.entries(counts).map(([c,n])=>`<b>${c}</b>: ${n}`).join(' · ');
+  $('btnEval').disabled = !model || !evalFiles.length;
+};
+
+$('btnEval').onclick = async () => {
+  if(needModel()) return;
+  const idxOf = {}; classNames.forEach((c,i)=> idxOf[norm(c)] = i);
+  const yTrue=[], probs=[], rows=[], skipped=new Set();
+  const prog = $('prog'); prog.hidden=false; prog.max = evalFiles.length; prog.value = 0;
+  $('btnEval').disabled = true; $('evalOut').innerHTML = '<p class="muted">Evaluando…</p>';
+  const t0 = performance.now();
+  for(const f of evalFiles){
+    const parts = f.webkitRelativePath.split('/'); const folder = parts[parts.length-2];
+    const k = idxOf[norm(folder)];
+    if(k === undefined){ skipped.add(folder); prog.value++; continue; }
+    const img = await loadImage(f);
+    const pred = await model.predict(img);
+    const p = classNames.map(c => pred.find(x=>x.className===c).probability);
+    URL.revokeObjectURL(img.src);
+    yTrue.push(k); probs.push(p);
+    rows.push({archivo:f.webkitRelativePath, real:classNames[k], pred:classNames[p.indexOf(Math.max(...p))], p});
+    prog.value++;
+    if(prog.value % 20 === 0) await new Promise(r=>setTimeout(r));
+  }
+  const secs = (performance.now()-t0)/1000;
+  prog.hidden = true; $('btnEval').disabled = false;
+  if(!yTrue.length){ $('evalOut').innerHTML = `<p class="warn">Ninguna subcarpeta coincide con las clases del modelo (${classNames.join(', ')}).</p>`; return; }
+  lastRows = rows; lastResult = computeAll(yTrue, probs, classNames);
+  lastResult.segundos = secs;
+  renderEval(lastResult, [...skipped]);
+  $('btnCsv').disabled = false; $('btnJson').disabled = false;
+};
+
+const COLORS = ['#1f7a4d','#2f6fb3','#c2701d','#8a3fa0','#c23b3b','#4a4a4a','#1b9aaa','#9a8b1b'];
+function renderEval(R, skipped){
+  const M = R.confusion, K = R.classNames.length;
+  const maxRow = M.map(r=>Math.max(1, r.reduce((a,b)=>a+b,0)));
+  let cm = `<table><tr><th>Real \\ Predicha</th>${R.classNames.map(c=>`<th>${c}</th>`).join('')}</tr>`;
+  M.forEach((r,i)=>{ cm += `<tr><th>${R.classNames[i]}</th>${r.map((v,j)=>{
+      const a = v/maxRow[i]; const bg = i===j ? `rgba(31,122,77,${a})` : `rgba(194,59,59,${a*0.85})`;
+      return `<td style="background:${bg};color:${a>.55?'#fff':'#1d2421'}">${v}</td>`;}).join('')}</tr>`; });
+  cm += '</table>';
+  let tb = `<table><tr><th>Clase</th><th>Precisión</th><th>Recall</th><th>F1</th><th>AUC</th><th>Soporte</th></tr>`;
+  R.perClass.forEach(m => tb += `<tr><td>${m.clase}</td><td>${f3(m.precision)}</td><td>${f3(m.recall)}</td><td>${f3(m.f1)}</td><td>${f3(m.auc)}</td><td>${m.support}</td></tr>`);
+  tb += `<tr><th>Macro</th><th>${f3(R.macro.precision)}</th><th>${f3(R.macro.recall)}</th><th>${f3(R.macro.f1)}</th><th>${f3(R.macro.auc)}</th><th>${R.n}</th></tr>`;
+  tb += `<tr><th>Ponderado</th><th>${f3(R.weighted.precision)}</th><th>${f3(R.weighted.recall)}</th><th>${f3(R.weighted.f1)}</th><th>—</th><th>${R.n}</th></tr></table>`;
+  $('evalOut').innerHTML = `
+    ${skipped.length?`<p class="warn">Carpetas ignoradas (no coinciden con ninguna clase): ${skipped.join(', ')}</p>`:''}
+    <div class="kpis">
+      <div class="kpi"><b>${pct(R.accuracy)}</b><span>Exactitud (accuracy)</span></div>
+      <div class="kpi"><b>${f3(R.macro.precision)}</b><span>Precisión macro</span></div>
+      <div class="kpi"><b>${f3(R.macro.recall)}</b><span>Recall macro</span></div>
+      <div class="kpi"><b>${f3(R.macro.f1)}</b><span>F1 macro</span></div>
+      <div class="kpi"><b>${f3(R.macro.auc)}</b><span>AUC macro (OvR)</span></div>
+      <div class="kpi"><b>${R.n}</b><span>Imágenes · ${(1000*R.segundos/R.n).toFixed(0)} ms/img</span></div>
+    </div>
+    <div class="two">
+      <div><h2>Matriz de confusión</h2>${cm}</div>
+      <div><h2>Curvas ROC (uno contra todos)</h2><canvas id="roc" width="520" height="440"></canvas></div>
+    </div>
+    <h2 style="margin-top:18px">Métricas por clase</h2>${tb}`;
+  drawROC($('roc'), R);
+}
+function drawROC(cv, R){
+  const g = cv.getContext('2d'), W=cv.width, H=cv.height, L=50, B=40, T=12, Rt=150;
+  const pw = W-L-Rt, ph = H-T-B, X = x=>L+x*pw, Y = y=>T+(1-y)*ph;
+  g.clearRect(0,0,W,H); g.font='12px system-ui'; g.fillStyle='#5d6b64'; g.strokeStyle='#dfe4e0';
+  for(let i=0;i<=5;i++){ const v=i/5; g.beginPath(); g.moveTo(X(v),Y(0)); g.lineTo(X(v),Y(1)); g.moveTo(X(0),Y(v)); g.lineTo(X(1),Y(v)); g.stroke();
+    g.fillText(v.toFixed(1), X(v)-8, Y(0)+16); g.fillText(v.toFixed(1), L-28, Y(v)+4); }
+  g.fillText('Tasa de falsos positivos (FPR)', L+pw/2-80, H-6);
+  g.save(); g.translate(14, T+ph/2+70); g.rotate(-Math.PI/2); g.fillText('Tasa de verdaderos positivos (TPR)',0,0); g.restore();
+  g.setLineDash([5,4]); g.strokeStyle='#999'; g.beginPath(); g.moveTo(X(0),Y(0)); g.lineTo(X(1),Y(1)); g.stroke(); g.setLineDash([]);
+  R.rocs.forEach((r,k)=>{
+    if(isNaN(r.auc)) return;
+    g.strokeStyle = COLORS[k%COLORS.length]; g.lineWidth=2; g.beginPath();
+    r.fpr.forEach((x,i)=> i? g.lineTo(X(x),Y(r.tpr[i])) : g.moveTo(X(x),Y(r.tpr[i]))); g.stroke();
+    g.fillStyle = COLORS[k%COLORS.length]; g.fillRect(L+pw+14, T+10+k*20, 12, 3);
+    g.fillStyle='#1d2421'; g.fillText(`${R.classNames[k]} (${r.auc.toFixed(3)})`, L+pw+30, T+15+k*20);
+  });
+  g.lineWidth=1;
+}
+function download(name, text, type){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text],{type})); a.download = name; a.click();
+}
+$('btnCsv').onclick = () => {
+  const head = ['archivo','clase_real','clase_predicha',...classNames.map(c=>'p_'+c)];
+  const esc = s => `"${String(s).replace(/"/g,'""')}"`;
+  const lines = [head.join(',')].concat(lastRows.map(r=>[esc(r.archivo), esc(r.real), esc(r.pred), ...r.p.map(x=>x.toFixed(6))].join(',')));
+  download('predicciones.csv', lines.join('\n'), 'text/csv');
+};
+$('btnJson').onclick = () => {
+  const {rocs, yPred, ...rest} = lastResult;
+  download('metricas.json', JSON.stringify(rest, null, 2), 'application/json');
+};
+})();
+</script>
+</body>
+</html>
